@@ -1,0 +1,53 @@
+# Kafka Connect worker with the Snowflake sink (image built from 02_streaming_ingestion/connect by
+# deploy.sh with `minikube image build`). Worker defaults are baked into the image. Snowflake
+# settings and the private key come from the snowflake-credentials Secret, which deploy.sh creates
+# from .env and which connector configs reference as ${env:VAR}.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-connect
+  labels: {app: kafka-connect}
+spec:
+  selector: {app: kafka-connect}
+  ports:
+    - {name: rest, port: 8083, targetPort: 8083}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-connect
+  labels: {app: kafka-connect}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: kafka-connect}
+  template:
+    metadata:
+      labels: {app: kafka-connect}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: kafka-connect
+          image: telematics/kafka-connect-snowflake:4.2.0
+          imagePullPolicy: Never
+          ports:
+            - {name: rest, containerPort: 8083}
+          env:
+            - {name: CONNECT_BOOTSTRAP_SERVERS, value: "kafka:29092"}
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
+          envFrom:
+            - secretRef:
+                name: snowflake-credentials
+          readinessProbe:
+            httpGet: {path: /connectors, port: 8083}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: 8083}
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 250m, memory: 1536Mi}
+            limits: {memory: 2Gi}

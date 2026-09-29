@@ -1,0 +1,93 @@
+# Single-node KRaft broker, mirroring the "kafka" service in docker/docker-compose.yml.
+# Listeners:
+#   INTERNAL :29092  in-cluster clients (Kafka Connect, Kafka UI, topic Job) via the "kafka" Service
+#   EXTERNAL :9092   host clients through `kubectl port-forward svc/kafka 9092:9092`, advertised as localhost:9092
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels: {app: kafka}
+spec:
+  selector: {app: kafka}
+  ports:
+    - {name: internal, port: 29092, targetPort: 29092}
+    - {name: external, port: 9092, targetPort: 9092}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels: {app: kafka}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: kafka}
+  ports:
+    - {name: internal, port: 29092}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels: {app: kafka}
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels: {app: kafka}
+  template:
+    metadata:
+      labels: {app: kafka}
+    spec:
+      # Otherwise Kubernetes injects KAFKA_PORT, KAFKA_SERVICE_HOST, ... for the "kafka" Service,
+      # which the image would turn into broker properties.
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:3.9.1
+          ports:
+            - {name: internal, containerPort: 29092}
+            - {name: controller, containerPort: 29093}
+            - {name: external, containerPort: 9092}
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: KAFKA_LISTENERS, value: "INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092"}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://kafka:29092,EXTERNAL://localhost:9092"}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: INTERNAL}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            # localhost: a Service only routes to ready pods, so the controller must not reach itself through one.
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:29093"}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0"}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xms512m -Xmx1g"}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 15
+          livenessProbe:
+            tcpSocket: {port: 29092}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 250m, memory: 1Gi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi

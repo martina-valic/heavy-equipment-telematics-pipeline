@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit tests & data contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            01_telemetry_simulator/requirements.txt
+            02_streaming_ingestion/requirements.txt
+            testing/python/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r testing/python/requirements.txt
+
+      - name: Check data contract schemas are valid JSON Schema
+        run: |
+          python - <<'EOF'
+          import json, pathlib
+          from jsonschema import Draft202012Validator
+          for path in sorted(pathlib.Path("documentation/data_contracts").glob("*.schema.json")):
+              Draft202012Validator.check_schema(json.loads(path.read_text(encoding="utf-8")))
+              print(f"valid: {path}")
+          EOF
+
+      - name: Run unit tests (no Kafka or Snowflake)
+        run: pytest -m "not integration and not snowflake"
+
+  compose-validate:
+    name: Docker Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker/docker-compose.yml config --quiet
+
+  kafka-integration:
+    name: Kafka integration tests
+    needs: [unit-tests, compose-validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            01_telemetry_simulator/requirements.txt
+            02_streaming_ingestion/requirements.txt
+            testing/python/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r testing/python/requirements.txt
+
+      # Only the broker and topic init: Kafka Connect needs Snowflake credentials, which CI doesn't have.
+      - name: Start Kafka and create topics
+        run: |
+          docker compose -f docker/docker-compose.yml up -d --wait kafka
+          docker compose -f docker/docker-compose.yml run --rm kafka-init
+
+      - name: Run Kafka integration tests
+        run: pytest -m "integration and not snowflake"
+
+      - name: Kafka logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml logs kafka
+
+      - name: Stop stack
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v

@@ -1,0 +1,59 @@
+# --- Secrets & credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.keystore
+*.truststore
+secrets/
+credentials*.json
+kubernetes/**/*secret*.yaml
+!kubernetes/**/*secret*.example.yaml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# --- dbt ---
+04_data_warehouse/**/target/
+04_data_warehouse/**/dbt_packages/
+04_data_warehouse/**/logs/
+.user.yml
+
+# --- Kafka Connect plugins & build artifacts ---
+*.jar
+*.zip
+*.tar.gz
+connect-plugins/
+plugins/
+
+# --- Logs & local data ---
+*.log
+logs/
+data/
+CLAUDE.md
+
+# --- Local raw data extracts ---
+01_telemetry_simulator/dim_equipment.csv
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

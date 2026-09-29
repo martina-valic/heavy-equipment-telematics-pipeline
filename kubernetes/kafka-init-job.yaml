@@ -1,0 +1,29 @@
+# Creates the topics with the same idempotent script Compose uses (kafka/create_topics.sh).
+# deploy.sh loads the script into the kafka-topics-script ConfigMap and deletes this Job before
+# each apply so it runs again. Retries until the broker is reachable.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  labels: {app: kafka-init}
+spec:
+  backoffLimit: 12
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: kafka-init}
+    spec:
+      enableServiceLinks: false
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: apache/kafka:3.9.1
+          command: ["bash", "/scripts/create_topics.sh"]
+          env:
+            - {name: KAFKA_BOOTSTRAP, value: "kafka:29092"}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap:
+            name: kafka-topics-script

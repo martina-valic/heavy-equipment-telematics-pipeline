@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telematics.local/contracts/equipment_telemetry.v1.schema.json",
+  "title": "Equipment Telemetry Event",
+  "description": "One telemetry snapshot emitted by a single piece of underground mining equipment. Produced to topic telematics.equipment.telemetry.v1, keyed by equipment_serial_number.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_timestamp",
+    "sequence_number",
+    "equipment_id",
+    "equipment_serial_number",
+    "type_name",
+    "category",
+    "operating_state",
+    "readings"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Semantic version of this contract the event was produced against.",
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "event_id": {
+      "description": "Unique identifier of the event (UUID v4). Consumers deduplicate on this field.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_timestamp": {
+      "description": "UTC time the reading was sampled on the machine (ISO 8601).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence_number": {
+      "description": "Per-machine monotonically increasing counter, starting at 1 on simulator start. Used to detect gaps.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "equipment_id": {
+      "description": "Surrogate key of the machine; joins to dim_equipment.equipment_id.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "equipment_serial_number": {
+      "description": "Natural key of the machine, e.g. SCOOP-003. Also used as the Kafka message key.",
+      "type": "string",
+      "pattern": "^[A-Z]+(-[A-Z]+)*-\\d{3}$"
+    },
+    "type_name": {
+      "type": "string",
+      "enum": [
+        "Roof_Bolter",
+        "Cable_Bolter",
+        "Face_Drill_Jumbo",
+        "Longhole_Drill",
+        "Scooptram_LHD",
+        "Mine_Truck_Hauler",
+        "Anfoloader_Emulsion",
+        "Scissor_Lift",
+        "Scaler",
+        "Underground_Grader"
+      ]
+    },
+    "category": {
+      "description": "Powertrain category.",
+      "type": "string",
+      "enum": ["BEV", "Diesel"]
+    },
+    "operating_state": {
+      "description": "Machine state at sample time. FAULT is a legitimate operational state, not a data-quality issue.",
+      "type": "string",
+      "enum": ["IDLE", "OPERATIONAL", "FAULT"]
+    },
+    "readings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/reading" }
+    }
+  },
+  "$defs": {
+    "reading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "value", "unit", "subsystem"],
+      "properties": {
+        "tag": {
+          "description": "OPC UA node identifier of the signal.",
+          "type": "string",
+          "pattern": "^NS=2;s=[A-Za-z0-9_]+$"
+        },
+        "value": {
+          "description": "Sensor value. null means the sensor did not report. Strings only for unit CODE; numbers otherwise.",
+          "type": ["number", "string", "null"]
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "BOOL", "CODE", "COUNT", "DEGC", "DEGREES", "HRS", "HZ", "KMH", "LPH",
+            "METERS", "MM", "PCT", "PSI", "RPM", "SEC", "TONNES", "VOLTS"
+          ]
+        },
+        "subsystem": {
+          "type": "string",
+          "enum": [
+            "Braking", "Diagnostics", "Drilling", "Electrical", "Environment", "Explosives",
+            "Ground_Support", "Hydraulics", "Location", "Material_Handling", "Mobility",
+            "Powertrain", "Road_Maintenance", "Safety", "Scaling", "Status", "Steering",
+            "Tires", "Utility"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "unit": { "const": "CODE" } } },
+          "then": { "properties": { "value": { "type": ["string", "null"] } } },
+          "else": { "properties": { "value": { "type": ["number", "null"] } } }
+        },
+        {
+          "if": { "properties": { "unit": { "const": "BOOL" } } },
+          "then": { "properties": { "value": { "enum": [0, 1, null] } } }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,3 @@
+confluent-kafka>=2.5,<3
+jsonschema[format-nongpl]>=4.22,<5
+python-dotenv>=1.0,<2
