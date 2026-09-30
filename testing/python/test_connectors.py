@@ -1,5 +1,6 @@
-"""Module 2 unit tests: connector configs stay consistent with the topics, the Snowflake setup and
-.env.example, and connector registration is idempotent. No Kafka or Snowflake needed."""
+"""Module 2 unit tests: Snowflake sink configs (telemetry and CDC) stay consistent with the topics,
+the Snowflake setup and .env.example, and connector registration is idempotent. No Kafka or
+Snowflake needed. The Debezium source is checked in test_cdc_config.py."""
 
 import importlib.util
 import json
@@ -16,25 +17,44 @@ from register_connectors import (
     check_no_literal_secrets,
     env_placeholders,
     load_connectors,
+    select_connectors,
 )
 
 CREATE_TOPICS = (REPO_ROOT / "kafka" / "create_topics.sh").read_text(encoding="utf-8")
-SETUP_SQL = (REPO_ROOT / "02_streaming_ingestion" / "snowflake" / "setup.sql").read_text(encoding="utf-8")
+# Module 2 creates the telemetry tables, Module 3 the CDC tables; both grant to the same role.
+SETUP_SQL = "\n".join(
+    (REPO_ROOT / module / "snowflake" / "setup.sql").read_text(encoding="utf-8")
+    for module in ("02_streaming_ingestion", "03_cdc_migration")
+)
 ENV_EXAMPLE = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
 CONNECTORS = load_connectors()
 SNOWFLAKE_CLASS = "com.snowflake.kafka.connector.SnowflakeStreamingSinkConnector"
+SNOWFLAKE_SINKS = [spec for spec in CONNECTORS if spec["config"]["connector.class"] == SNOWFLAKE_CLASS]
 
 
 def created_topics() -> set[str]:
     return set(re.findall(r"^create_topic (\S+)", CREATE_TOPICS, re.MULTILINE))
 
 
-def test_one_connector_per_contract_topic():
-    topics = {spec["config"]["topics"] for spec in CONNECTORS}
-    assert topics == {"telematics.equipment.telemetry.v1", "telematics.equipment.telemetry.dlq.v1"}
+def topic_list(config: dict) -> list[str]:
+    return [t.strip() for t in config["topics"].split(",")]
 
 
-@pytest.mark.parametrize("spec", CONNECTORS, ids=lambda s: s["name"])
+def topic_table_map(config: dict) -> dict[str, str]:
+    return dict(pair.split(":") for pair in config["snowflake.topic2table.map"].split(","))
+
+
+def test_every_contract_topic_is_sunk_exactly_once():
+    topics = [t for spec in SNOWFLAKE_SINKS for t in topic_list(spec["config"])]
+    assert sorted(topics) == sorted({
+        "telematics.equipment.telemetry.v1",
+        "telematics.equipment.telemetry.dlq.v1",
+        "telematics.legacy.equipment.cdc.v1",
+        "telematics.legacy.hour_meter_logs.cdc.v1",
+    })
+
+
+@pytest.mark.parametrize("spec", SNOWFLAKE_SINKS, ids=lambda s: s["name"])
 class TestConnectorConfig:
     def test_uses_v4_streaming_connector_without_schematization(self, spec):
         config = spec["config"]
@@ -45,23 +65,47 @@ class TestConnectorConfig:
 
     def test_source_and_error_topics_are_created(self, spec):
         config = spec["config"]
-        assert config["topics"] in created_topics()
+        assert set(topic_list(config)) <= created_topics()
         assert config["errors.deadletterqueue.topic.name"] in created_topics()
 
     def test_target_table_is_created_and_granted_in_setup_sql(self, spec):
-        topic, table = spec["config"]["snowflake.topic2table.map"].split(":")
-        assert topic == spec["config"]["topics"]
-        assert f"CREATE TABLE IF NOT EXISTS TELEMATICS.BRONZE.{table} (" in SETUP_SQL
-        assert re.search(rf"GRANT INSERT\s+ON TABLE\s+TELEMATICS\.BRONZE\.{table}\s", SETUP_SQL)
+        mapping = topic_table_map(spec["config"])
+        assert sorted(mapping) == sorted(topic_list(spec["config"]))
+        for table in mapping.values():
+            assert f"CREATE TABLE IF NOT EXISTS TELEMATICS.BRONZE.{table} (" in SETUP_SQL
+            assert re.search(rf"GRANT INSERT\s+ON TABLE\s+TELEMATICS\.BRONZE\.{table}\s", SETUP_SQL)
 
     def test_secrets_are_env_placeholders(self, spec):
         config = spec["config"]
         assert config["snowflake.private.key"] == "${env:SNOWFLAKE_PRIVATE_KEY}"
         check_no_literal_secrets(spec["name"], config)
 
-    def test_every_env_placeholder_is_documented_in_env_example(self, spec):
-        for var in env_placeholders(spec["config"]):
-            assert re.search(rf"^{var}=", ENV_EXAMPLE, re.MULTILINE), f"{var} missing from .env.example"
+
+@pytest.mark.parametrize("spec", CONNECTORS, ids=lambda s: s["name"])
+def test_every_env_placeholder_is_documented_in_env_example(spec):
+    for var in env_placeholders(spec["config"]):
+        assert re.search(rf"^{var}=", ENV_EXAMPLE, re.MULTILINE), f"{var} missing from .env.example"
+
+
+def test_connectors_load_from_both_modules():
+    names = {spec["name"] for spec in CONNECTORS}
+    assert {"snowflake-sink-telemetry", "debezium-source-legacy-fleet", "snowflake-sink-legacy-cdc"} <= names
+
+
+def test_duplicate_connector_names_are_rejected(tmp_path):
+    for directory in ("a", "b"):
+        (tmp_path / directory).mkdir()
+        (tmp_path / directory / "c.json").write_text(json.dumps({"name": "same", "config": {}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate connector name"):
+        load_connectors([tmp_path / "a", tmp_path / "b"])
+
+
+def test_select_connectors_filters_by_name():
+    selected = select_connectors(CONNECTORS, ["debezium-source-legacy-fleet"])
+    assert [spec["name"] for spec in selected] == ["debezium-source-legacy-fleet"]
+    assert select_connectors(CONNECTORS, None) == CONNECTORS
+    with pytest.raises(ValueError, match="Unknown connector"):
+        select_connectors(CONNECTORS, ["nope"])
 
 
 def test_literal_secret_is_rejected():

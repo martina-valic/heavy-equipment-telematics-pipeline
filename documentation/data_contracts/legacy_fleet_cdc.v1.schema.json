@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telematics.local/contracts/legacy_fleet_cdc.v1.schema.json",
+  "title": "Legacy Fleet CDC Event",
+  "description": "One Debezium change event for a row of the legacy telematics_legacy database (schema fleet). Produced by connector debezium-source-legacy-fleet to telematics.legacy.equipment.cdc.v1 or telematics.legacy.hour_meter_logs.cdc.v1, JSON without embedded schemas. The envelope is open (Debezium may add fields); row images are closed, so a column added to or removed from the source table breaks the contract.",
+  "type": "object",
+  "required": ["before", "after", "source", "op", "ts_ms"],
+  "properties": {
+    "op": {
+      "description": "r = read during a snapshot, c = insert, u = update, d = delete.",
+      "enum": ["r", "c", "u", "d"]
+    },
+    "ts_ms": {
+      "description": "Epoch milliseconds when Debezium processed the change.",
+      "type": "integer"
+    },
+    "source": {"$ref": "#/$defs/source"},
+    "before": {"description": "Row before the change (complete, REPLICA IDENTITY FULL). null for r and c."},
+    "after": {"description": "Row after the change. null for d."},
+    "transaction": {"type": ["object", "null"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"op": {"enum": ["r", "c"]}}},
+      "then": {"properties": {"before": {"type": "null"}, "after": {"type": "object"}}}
+    },
+    {
+      "if": {"properties": {"op": {"const": "u"}}},
+      "then": {"properties": {"before": {"type": "object"}, "after": {"type": "object"}}}
+    },
+    {
+      "if": {"properties": {"op": {"const": "d"}}},
+      "then": {"properties": {"before": {"type": "object"}, "after": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"source": {"properties": {"table": {"const": "equipment"}}}}},
+      "then": {
+        "properties": {
+          "before": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/equipment_row"}]},
+          "after": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/equipment_row"}]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"source": {"properties": {"table": {"const": "hour_meter_logs"}}}}},
+      "then": {
+        "properties": {
+          "before": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/hour_meter_log_row"}]},
+          "after": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/hour_meter_log_row"}]}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "source": {
+      "description": "Where the change came from. Silver orders changes by lsn and deduplicates on (lsn, table, primary key).",
+      "type": "object",
+      "required": ["version", "connector", "name", "ts_ms", "snapshot", "db", "schema", "table", "txId", "lsn"],
+      "properties": {
+        "version": {"type": "string"},
+        "connector": {"const": "postgresql"},
+        "name": {"const": "telematics.legacy"},
+        "ts_ms": {"description": "Epoch milliseconds of the source commit (snapshot start for op = r).", "type": "integer"},
+        "snapshot": {
+          "description": "Snapshot position for op = r events; \"false\" for streamed changes.",
+          "enum": ["true", "false", "first", "first_in_data_collection", "last_in_data_collection", "last", "incremental"]
+        },
+        "db": {"const": "telematics_legacy"},
+        "schema": {"const": "fleet"},
+        "table": {"enum": ["equipment", "hour_meter_logs"]},
+        "txId": {"type": ["integer", "null"]},
+        "lsn": {"description": "Postgres log sequence number of the change.", "type": ["integer", "null"]}
+      }
+    },
+    "timestamptz": {
+      "description": "Postgres timestamptz, as ISO 8601 in UTC with microseconds.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "equipment_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "equipment_id", "equipment_serial_number", "type_name", "category", "manufacturer", "model",
+        "commissioned_on", "assigned_site", "status", "service_interval_hours", "created_at", "updated_at"
+      ],
+      "properties": {
+        "equipment_id": {"type": "integer", "minimum": 1},
+        "equipment_serial_number": {"type": "string", "pattern": "^[A-Z-]+-\\d{3}$"},
+        "type_name": {"type": "string"},
+        "category": {"enum": ["BEV", "Diesel"]},
+        "manufacturer": {"type": "string"},
+        "model": {"type": "string"},
+        "commissioned_on": {"description": "Postgres date, as days since 1970-01-01.", "type": "integer"},
+        "assigned_site": {"type": "string"},
+        "status": {"enum": ["ACTIVE", "STANDBY", "MAINTENANCE", "DECOMMISSIONED"]},
+        "service_interval_hours": {"type": "integer", "minimum": 1},
+        "created_at": {"$ref": "#/$defs/timestamptz"},
+        "updated_at": {"$ref": "#/$defs/timestamptz"}
+      }
+    },
+    "hour_meter_log_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "log_id", "equipment_id", "reading_at", "hour_meter", "source", "recorded_by", "created_at", "updated_at"
+      ],
+      "properties": {
+        "log_id": {"type": "integer", "minimum": 1},
+        "equipment_id": {"type": "integer", "minimum": 1},
+        "reading_at": {"$ref": "#/$defs/timestamptz"},
+        "hour_meter": {"description": "numeric(9,1) as a decimal string, so no precision is lost.", "type": "string", "pattern": "^\\d+\\.\\d$"},
+        "source": {"enum": ["SHIFT_REPORT", "OPERATOR_LOG", "SERVICE_VISIT"]},
+        "recorded_by": {"type": "string"},
+        "created_at": {"$ref": "#/$defs/timestamptz"},
+        "updated_at": {"$ref": "#/$defs/timestamptz"}
+      }
+    }
+  }
+}

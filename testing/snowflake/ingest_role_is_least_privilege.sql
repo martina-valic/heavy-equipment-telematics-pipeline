@@ -1,5 +1,6 @@
--- TELEMATICS_INGEST_ROLE holds only what setup.sql grants: it can insert into and read Bronze, but
--- cannot update, delete, truncate, create tables or own anything outside its streaming pipes.
+-- TELEMATICS_INGEST_ROLE holds only what the Module 2 and 3 setup.sql files grant: it can insert
+-- into and read Bronze, but cannot update, delete, truncate, create tables or own anything
+-- outside its streaming pipes.
 -- Returns any grant outside that allowlist.
 SHOW GRANTS TO ROLE TELEMATICS_INGEST_ROLE;
 
@@ -13,6 +14,11 @@ WITH allowed (privilege, granted_on, name) AS (
         ('INSERT',      'TABLE',     'TELEMATICS.BRONZE.EQUIPMENT_TELEMETRY_DLQ_RAW'),
         ('SELECT',      'TABLE',     'TELEMATICS.BRONZE.EQUIPMENT_TELEMETRY_DLQ_RAW'),
         ('SELECT',      'VIEW',      'TELEMATICS.BRONZE.INGESTION_FRESHNESS'),
+        ('INSERT',      'TABLE',     'TELEMATICS.BRONZE.LEGACY_EQUIPMENT_CDC_RAW'),
+        ('SELECT',      'TABLE',     'TELEMATICS.BRONZE.LEGACY_EQUIPMENT_CDC_RAW'),
+        ('INSERT',      'TABLE',     'TELEMATICS.BRONZE.LEGACY_HOUR_METER_LOGS_CDC_RAW'),
+        ('SELECT',      'TABLE',     'TELEMATICS.BRONZE.LEGACY_HOUR_METER_LOGS_CDC_RAW'),
+        ('SELECT',      'VIEW',      'TELEMATICS.BRONZE.CDC_FRESHNESS'),
         ('USAGE',       'WAREHOUSE', 'TELEMATICS_WH')
 ),
 granted AS (

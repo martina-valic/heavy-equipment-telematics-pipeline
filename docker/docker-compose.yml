@@ -1,5 +1,6 @@
-# Local dev stack for Modules 1-2: single-node KRaft broker, Kafka Connect with the
-# Snowflake sink, and Kafka UI. The same stack runs on Minikube from kubernetes/.
+# Local dev stack for Modules 1-3: single-node KRaft broker, the legacy PostgreSQL database,
+# Kafka Connect with the Snowflake sink and Debezium source, and Kafka UI. The same stack runs on
+# Minikube from kubernetes/.
 # Usage (from repo root): docker compose -f docker/docker-compose.yml up -d --build
 name: telematics
 
@@ -48,9 +49,38 @@ services:
     entrypoint: ["bash", "/scripts/create_topics.sh"]
     restart: "no"
 
+  # Legacy fleet database (Module 3). wal_level=logical lets Debezium stream changes over pgoutput.
+  # The init scripts create the schema, publication and roles and load the seed data. They only
+  # run when the data volume is empty. Passwords come from the repo-root .env (see .env.example).
+  postgres:
+    image: postgres:16.15
+    container_name: telematics-postgres
+    ports:
+      - "5432:5432"
+    env_file:
+      - path: ../.env
+        required: false
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      # A stopped connector keeps its slot and retains WAL. Cap it so the disk cannot fill up.
+      # If the slot falls behind this limit it is invalidated and Debezium needs a new snapshot.
+      - -c
+      - max_slot_wal_keep_size=1GB
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../03_cdc_migration/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
   kafka-connect:
     build: ../02_streaming_ingestion/connect
-    image: telematics/kafka-connect-snowflake:4.2.0
+    image: telematics/kafka-connect:sf4.2.0-dbz3.7.0
     container_name: telematics-kafka-connect
     depends_on:
       kafka:
@@ -59,8 +89,9 @@ services:
         condition: service_completed_successfully
     ports:
       - "8083:8083"
-    # Snowflake settings and SNOWFLAKE_PRIVATE_KEY come from the repo-root .env. Connector configs
-    # reference them as ${env:VAR}; worker defaults live in the image (see the Dockerfile).
+    # Snowflake settings, SNOWFLAKE_PRIVATE_KEY and the Postgres CDC credentials come from the
+    # repo-root .env. Connector configs reference them as ${env:VAR}; worker defaults live in the
+    # image (see the Dockerfile).
     env_file:
       - path: ../.env
         required: false
@@ -91,3 +122,4 @@ services:
 
 volumes:
   kafka-data:
+  postgres-data:

@@ -1,4 +1,5 @@
-"""Registers every connector in connectors/ with the Kafka Connect REST API.
+"""Registers every connector in 02_streaming_ingestion/connectors/ (Snowflake sinks) and
+03_cdc_migration/connectors/ (Debezium source, CDC sink) with the Kafka Connect REST API.
 
 Idempotent: each connector is created or updated with PUT /connectors/<name>/config, so re-running
 never fails on "already exists". Transient errors (409 while the worker rebalances, 5xx while it
@@ -11,6 +12,7 @@ register a config that has a literal value for a sensitive key.
 
 Usage (from the repo root, stdlib only):
     python 02_streaming_ingestion/register_connectors.py [--connect-url http://localhost:8083]
+    python 02_streaming_ingestion/register_connectors.py --only debezium-source-legacy-fleet
 """
 
 import argparse
@@ -21,9 +23,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
 
-CONNECTORS_DIR = Path(__file__).resolve().parent / "connectors"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CONNECTORS_DIRS = (
+    REPO_ROOT / "02_streaming_ingestion" / "connectors",
+    REPO_ROOT / "03_cdc_migration" / "connectors",
+)
 SENSITIVE_KEY = re.compile(r"(private\.key|passphrase|password|secret|token)", re.IGNORECASE)
 PLACEHOLDER = re.compile(r"\$\{(\w+):(?:[^}:]*:)?([^}]+)\}")
 RETRYABLE_STATUS = {404, 409, 500, 502, 503, 504}
@@ -33,17 +40,31 @@ class ConnectError(RuntimeError):
     pass
 
 
-def load_connectors(directory: Path = CONNECTORS_DIR) -> list[dict]:
-    connectors = []
-    for path in sorted(directory.glob("*.json")):
+def load_connectors(directories: Iterable[Path] = CONNECTORS_DIRS) -> list[dict]:
+    connectors, names = [], set()
+    directories = list(directories)
+    for path in (p for directory in directories for p in sorted(directory.glob("*.json"))):
         spec = json.loads(path.read_text(encoding="utf-8"))
         if not spec.get("name") or not isinstance(spec.get("config"), dict):
             raise ValueError(f"{path.name}: expected an object with 'name' and 'config'")
+        if spec["name"] in names:
+            raise ValueError(f"{path.name}: duplicate connector name {spec['name']}")
         check_no_literal_secrets(spec["name"], spec["config"])
+        names.add(spec["name"])
         connectors.append(spec)
     if not connectors:
-        raise ValueError(f"No connector files found in {directory}")
+        raise ValueError(f"No connector files found in {', '.join(map(str, directories))}")
     return connectors
+
+
+def select_connectors(connectors: list[dict], only: list[str] | None) -> list[dict]:
+    """Keep only the named connectors (all of them if only is empty)."""
+    if not only:
+        return connectors
+    unknown = sorted(set(only) - {spec["name"] for spec in connectors})
+    if unknown:
+        raise ValueError(f"Unknown connector(s): {', '.join(unknown)}")
+    return [spec for spec in connectors if spec["name"] in only]
 
 
 def check_no_literal_secrets(name: str, config: dict) -> None:
@@ -120,20 +141,24 @@ def load_local_env() -> None:
         from dotenv import load_dotenv
     except ImportError:
         return
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    load_dotenv(REPO_ROOT / ".env")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--connect-url", default=None, help="default: $KAFKA_CONNECT_URL or http://localhost:8083")
     parser.add_argument("--timeout", type=float, default=120, help="seconds to wait for each connector to run")
+    parser.add_argument(
+        "--only", action="append", metavar="NAME",
+        help="register only this connector (repeatable), e.g. the Debezium source in CI without Snowflake",
+    )
     args = parser.parse_args()
 
     load_local_env()
     client = ConnectClient(args.connect_url or os.getenv("KAFKA_CONNECT_URL", "http://localhost:8083"))
 
     try:
-        connectors = load_connectors()
+        connectors = select_connectors(load_connectors(), args.only)
         client.wait_until_ready()
 
         installed = client.installed_plugins()

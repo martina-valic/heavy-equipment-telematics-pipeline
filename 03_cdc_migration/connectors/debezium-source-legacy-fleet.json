@@ -1,0 +1,36 @@
+{
+  "name": "debezium-source-legacy-fleet",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.dbname": "${env:POSTGRES_DB}",
+    "database.user": "${env:POSTGRES_CDC_USER}",
+    "database.password": "${env:POSTGRES_CDC_PASSWORD}",
+
+    "plugin.name": "pgoutput",
+    "slot.name": "telematics_cdc_slot",
+    "publication.name": "telematics_cdc_pub",
+    "publication.autocreate.mode": "disabled",
+    "table.include.list": "fleet.equipment,fleet.hour_meter_logs",
+    "snapshot.mode": "initial",
+
+    "topic.prefix": "telematics.legacy",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "telematics\\.legacy\\.fleet\\.(.+)",
+    "transforms.route.replacement": "telematics.legacy.$1.cdc.v1",
+    "message.key.columns": "fleet.hour_meter_logs:equipment_id",
+
+    "decimal.handling.mode": "string",
+    "tombstones.on.delete": "false",
+    "heartbeat.interval.ms": "30000",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}

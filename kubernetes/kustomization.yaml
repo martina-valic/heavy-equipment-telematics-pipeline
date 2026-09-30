@@ -1,5 +1,6 @@
-# Apply with deploy.sh, which first creates the kafka-topics-script ConfigMap and the
-# snowflake-credentials Secret (both built from files outside this directory).
+# Apply with deploy.sh, which first creates the kafka-topics-script and postgres-init-scripts
+# ConfigMaps and the snowflake-credentials, postgres-credentials and postgres-cdc-credentials
+# Secrets (all built from files outside this directory).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: telematics
@@ -7,5 +8,6 @@ resources:
   - namespace.yaml
   - kafka.yaml
   - kafka-init-job.yaml
+  - postgres.yaml
   - kafka-connect.yaml
   - kafka-ui.yaml

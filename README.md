@@ -16,8 +16,9 @@ A production-grade, end-to-end data platform designed to ingest, synchronize, an
 * **Data Routing**: Streams the telemetry topic and its dead-letter topic into Snowflake Bronze landing tables within a 120-second ingestion SLA.
 
 ## Module 3: Legacy Database Migration & Change Data Capture (`03_cdc_migration`)
-* **PostgreSQL Source (`03_cdc_migration`)**: Local transactional PostgreSQL (SQL) database (`telematics_legacy`) managing core equipment metadata and historical hour-meter logs.
-* **Debezium CDC Pipeline**: Configured and registered the Debezium PostgreSQL connector using `pgoutput` logical decoding to stream real-time row changes (`INSERT`, `UPDATE`, `DELETE`) into Kafka topics.
+* **PostgreSQL Source**: Transactional PostgreSQL 16 database (`telematics_legacy`) managing core equipment metadata and historical hour-meter logs, seeded from the Module 1 fleet, with least-privilege replication and application roles. A simulated legacy application keeps it changing.
+* **Debezium CDC Pipeline**: Debezium 3.7 PostgreSQL connector using `pgoutput` logical decoding. It migrates the existing rows with an initial snapshot, then streams real-time row changes (`INSERT`, `UPDATE`, `DELETE`) with full before and after images into versioned Kafka topics, governed by a data contract.
+* **Bronze Landing**: The Snowflake sink lands the raw Debezium envelopes in Bronze CDC tables within the same 120-second SLA, measured from the Postgres commit. It runs on Docker Compose and Minikube and is exercised end to end in CI.
 
 ## Module 4: Modern Data Warehouse & Medallion Transformation (`04_data_warehouse`)
 * **Bronze Tier**: Landing zone for raw, unparsed JSON payloads originating from both IoT streams and Debezium CDC logs.

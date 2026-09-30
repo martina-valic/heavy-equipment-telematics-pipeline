@@ -1,0 +1,33 @@
+{
+  "name": "snowflake-sink-legacy-cdc",
+  "config": {
+    "connector.class": "com.snowflake.kafka.connector.SnowflakeStreamingSinkConnector",
+    "tasks.max": "1",
+    "topics": "telematics.legacy.equipment.cdc.v1,telematics.legacy.hour_meter_logs.cdc.v1",
+    "snowflake.topic2table.map": "telematics.legacy.equipment.cdc.v1:LEGACY_EQUIPMENT_CDC_RAW,telematics.legacy.hour_meter_logs.cdc.v1:LEGACY_HOUR_METER_LOGS_CDC_RAW",
+
+    "snowflake.url.name": "${env:SNOWFLAKE_ACCOUNT}.snowflakecomputing.com:443",
+    "snowflake.user.name": "${env:SNOWFLAKE_USER}",
+    "snowflake.role.name": "${env:SNOWFLAKE_ROLE}",
+    "snowflake.database.name": "${env:SNOWFLAKE_DATABASE}",
+    "snowflake.schema.name": "${env:SNOWFLAKE_BRONZE_SCHEMA}",
+    "snowflake.authenticator": "snowflake_jwt",
+    "snowflake.private.key": "${env:SNOWFLAKE_PRIVATE_KEY}",
+    "enable.task.fail.on.authorization.errors": "true",
+
+    "snowflake.enable.schematization": "false",
+    "snowflake.autocreate.table.type": "none",
+    "snowflake.streaming.validate.compatibility.with.classic": "false",
+    "snowflake.validation": "client_side",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.deadletterqueue.topic.name": "telematics.connect.snowflake.dlq.v1",
+    "errors.deadletterqueue.topic.replication.factor": "1",
+    "errors.deadletterqueue.context.headers.enable": "true"
+  }
+}

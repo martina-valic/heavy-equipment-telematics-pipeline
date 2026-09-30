@@ -1,3 +1,4 @@
 -r ../../01_telemetry_simulator/requirements.txt
 -r ../../02_streaming_ingestion/requirements.txt
+-r ../../03_cdc_migration/requirements.txt
 pytest>=8,<10

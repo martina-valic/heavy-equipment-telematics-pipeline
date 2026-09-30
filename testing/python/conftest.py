@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "01_telemetry_simulator"))
 sys.path.insert(0, str(REPO_ROOT / "02_streaming_ingestion"))
+sys.path.insert(0, str(REPO_ROOT / "03_cdc_migration"))
+sys.path.insert(0, str(REPO_ROOT / "03_cdc_migration" / "postgres"))
 
 from contract import load_validator  # noqa: E402
 from simulator import FleetSimulator  # noqa: E402
@@ -52,5 +54,35 @@ def snowflake_connection():
         )
     except snowflake_connector.errors.Error as exc:
         pytest.skip(f"Cannot connect to Snowflake: {exc}")
+    with conn:
+        yield conn
+
+
+def unavailable(reason: str):
+    """Skip locally when a service isn't running; in CI the service is started on purpose, so fail."""
+    if os.getenv("CI"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
+@pytest.fixture(scope="session")
+def legacy_db():
+    """Autocommit connection to the legacy Postgres database as the application user."""
+    load_dotenv(REPO_ROOT / ".env")
+    psycopg = pytest.importorskip("psycopg")
+    if not os.getenv("POSTGRES_APP_PASSWORD"):
+        unavailable("POSTGRES_APP_PASSWORD not set: run 03_cdc_migration/postgres/configure_env.py")
+    try:
+        conn = psycopg.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            dbname=os.getenv("POSTGRES_DB", "telematics_legacy"),
+            user=os.getenv("POSTGRES_APP_USER", "legacy_app"),
+            password=os.environ["POSTGRES_APP_PASSWORD"],
+            autocommit=True,
+            connect_timeout=5,
+        )
+    except psycopg.OperationalError as exc:
+        unavailable(f"Cannot connect to the legacy Postgres database: {exc}")
     with conn:
         yield conn

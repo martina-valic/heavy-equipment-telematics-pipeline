@@ -16,15 +16,15 @@ The same stack runs in two places:
 | Use it for | Fast local development | Kubernetes deployment |
 | Definition | [docker/docker-compose.yml](../docker/docker-compose.yml) | [kubernetes/](../kubernetes/) |
 | Kafka | KRaft, single node | KRaft, single-node StatefulSet |
-| Credentials | `.env` passed to the Connect container | `snowflake-credentials` Secret built from `.env` |
+| Credentials | `.env` passed to the Connect container | `snowflake-credentials` (and, for Module 3, `postgres-cdc-credentials`) Secrets built from `.env` |
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `connect/Dockerfile` | Kafka Connect worker image (`cp-kafka-connect` 7.9, i.e. Kafka Connect 3.9) with the Snowflake connector jar, checksum-verified at build time |
+| `connect/Dockerfile` | Kafka Connect worker image (`cp-kafka-connect` 7.9, i.e. Kafka Connect 3.9) with the Snowflake connector and the Debezium PostgreSQL connector ([Module 3](../03_cdc_migration/README.md)), both checksum-verified at build time |
 | `connectors/*.json` | One config per connector. Secrets are `${env:VAR}` placeholders |
-| `register_connectors.py` | Creates or updates every connector through the REST API, then waits for it to reach `RUNNING`. Standard library only |
+| `register_connectors.py` | Creates or updates every connector in this module and in `03_cdc_migration/connectors/` through the REST API, then waits for each to reach `RUNNING`. `--only NAME` registers a subset. Standard library only |
 | `snowflake/setup.sql` | Idempotent Snowflake setup: warehouse, database, `BRONZE` schema, landing tables, freshness view, role, service user, grants |
 | `snowflake/generate_keypair.py` | Creates the RSA key pair, writes `SNOWFLAKE_PRIVATE_KEY` to `.env`, and renders `setup.sql` with the public key |
 

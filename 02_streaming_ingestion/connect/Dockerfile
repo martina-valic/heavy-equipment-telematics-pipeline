@@ -1,7 +1,9 @@
 # check=skip=SecretsUsedInArgOrEnv
 # (False positive: it flags CONNECT_KEY_CONVERTER. No secrets are baked into this image.)
 #
-# Kafka Connect worker with the Snowflake Kafka connector (v4, high-performance Snowpipe Streaming).
+# Kafka Connect worker with two plugins:
+#   - Snowflake Kafka connector (v4, high-performance Snowpipe Streaming) sink, Module 2
+#   - Debezium PostgreSQL source connector (CDC from the legacy database), Module 3
 # Used by both docker/docker-compose.yml and the Minikube manifests in kubernetes/.
 #
 # The connector ships a Rust-based native library, so the runtime image must be glibc-based
@@ -14,10 +16,14 @@ ARG BC_FIPS_VERSION=2.1.0
 ARG BC_FIPS_SHA1=c8df3d47f9854f3e9ca57e9fc862da18c9381fa9
 ARG BCPKIX_FIPS_VERSION=2.1.8
 ARG BCPKIX_FIPS_SHA1=38bf2d32f177a6d2c3e7b316a8673ae3f3c18516
+# Debezium 3.x needs Java 17+ and Kafka Connect 3.1+; this base image has both.
+ARG DEBEZIUM_VERSION=3.7.0.Final
+ARG DEBEZIUM_POSTGRES_SHA256=660673cbabd2f269da21409208ebd0f0d9977bd92e824fc9daa272f240e88e51
 
 # --- Stage 1: download plugin jars from Maven Central and verify their checksums ---
 FROM alpine:3.20 AS plugins
 ARG SNOWFLAKE_CONNECTOR_VERSION SNOWFLAKE_CONNECTOR_SHA1 BC_FIPS_VERSION BC_FIPS_SHA1 BCPKIX_FIPS_VERSION BCPKIX_FIPS_SHA1
+ARG DEBEZIUM_VERSION DEBEZIUM_POSTGRES_SHA256
 WORKDIR /plugins/snowflake-kafka-connector
 RUN set -eu; \
     maven=https://repo1.maven.org/maven2; \
@@ -29,6 +35,14 @@ RUN set -eu; \
       "$BC_FIPS_SHA1" "bc-fips-${BC_FIPS_VERSION}.jar" \
       "$BCPKIX_FIPS_SHA1" "bcpkix-fips-${BCPKIX_FIPS_VERSION}.jar" \
       | sha1sum -c -
+# The Debezium plugin archive unpacks to debezium-connector-postgres/ with its own dependencies.
+WORKDIR /plugins
+RUN set -eu; \
+    archive="debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz"; \
+    wget -q "https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/${DEBEZIUM_VERSION}/$archive"; \
+    printf '%s  %s\n' "$DEBEZIUM_POSTGRES_SHA256" "$archive" | sha256sum -c -; \
+    tar -xzf "$archive"; \
+    rm "$archive"
 
 # --- Stage 2: Connect worker ---
 FROM confluentinc/cp-kafka-connect:7.9.10

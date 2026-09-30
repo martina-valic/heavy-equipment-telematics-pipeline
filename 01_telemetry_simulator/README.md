@@ -61,9 +61,10 @@ python -m venv .venv
 
 | Job | What it checks |
 |---|---|
-| Unit tests & data contract | Every `*.schema.json` in `documentation/data_contracts/` is valid JSON Schema, then `pytest -m "not integration and not snowflake"` |
-| Docker Compose validation | `docker compose config` parses the stack |
+| Unit tests & data contract | Every `*.schema.json` in `documentation/data_contracts/` is valid JSON Schema, then `pytest -m "not integration and not snowflake and not cdc"` |
+| Docker Compose & Kubernetes validation | `docker compose config` parses the stack, and the Kustomize output passes `kubeconform -strict` |
 | Kafka integration tests | Starts the broker and creates topics on the runner, then runs `pytest -m "integration and not snowflake"`. Missing Kafka fails the job instead of skipping |
+| CDC integration tests | Generates throwaway Postgres passwords, starts Kafka, Postgres and Kafka Connect, registers only the Debezium source, then runs `pytest -m "cdc and not snowflake"` ([Module 3](../03_cdc_migration/README.md#tests)) |
 
 Snowflake tests don't run in CI because they need account credentials.
 
