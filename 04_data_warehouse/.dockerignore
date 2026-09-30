@@ -1,0 +1,11 @@
+target/
+dbt_packages/
+logs/
+__pycache__/
+.user.yml
+snowflake/
+generate_signal_catalog.py
+run_dbt.py
+README.md
+Dockerfile
+.dockerignore

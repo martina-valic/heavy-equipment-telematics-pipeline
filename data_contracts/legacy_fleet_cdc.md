@@ -3,7 +3,7 @@
 | Item | Value |
 |---|---|
 | Schema | [legacy_fleet_cdc.v1.schema.json](legacy_fleet_cdc.v1.schema.json) (JSON Schema 2020-12) |
-| Producer | Debezium PostgreSQL connector `debezium-source-legacy-fleet` ([Module 3](../../03_cdc_migration/README.md)) |
+| Producer | Debezium PostgreSQL connector `debezium-source-legacy-fleet` ([Module 3](../03_cdc_migration/README.md)) |
 | Source | Postgres database `telematics_legacy`, schema `fleet`, publication `telematics_cdc_pub`, slot `telematics_cdc_slot` |
 | Topics | `telematics.legacy.equipment.cdc.v1` (1 partition), `telematics.legacy.hour_meter_logs.cdc.v1` (3 partitions) |
 | Message key | JSON `{"equipment_id": N}` on both topics, so all changes to one machine stay in order within a partition |
@@ -62,7 +62,7 @@ The columns of each table are listed in the schema (`$defs.equipment_row`, `$def
 
 The envelope is **open**. Debezium may add fields in newer versions (for example `ts_us`, `origin`), and consumers must ignore fields they don't know. The row images are **closed** (`additionalProperties: false`): a column added to, removed from or retyped in the source tables fails validation. That makes a schema change in the legacy database a visible contract change rather than silent drift into Silver.
 
-The contract is checked by the CDC integration tests on real events from Kafka, and by [`cdc_envelope_matches_contract.sql`](../../testing/snowflake/cdc_envelope_matches_contract.sql) on rows in Bronze.
+The contract is checked by the CDC integration tests on real events from Kafka, and by [`cdc_envelope_matches_contract.sql`](../testing/snowflake/cdc_envelope_matches_contract.sql) on rows in Bronze.
 
 ## Versioning
 

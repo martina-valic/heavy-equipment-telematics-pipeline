@@ -1,6 +1,6 @@
 # Snowflake SQL Tests
 
-Data tests that run directly against Snowflake. Each `.sql` file selects the rows that **violate** one expectation, so a test passes when its query returns zero rows. This is the same convention as dbt singular tests, so these checks can move into the Module 4 dbt project unchanged.
+Data tests that run directly against Snowflake. Each `.sql` file selects the rows that **violate** one expectation, so a test passes when its query returns zero rows. This is the same convention as dbt singular tests. They stay here rather than in the [Module 4 dbt project](../../04_data_warehouse/README.md) because they check the ingestion layer as the connector's service user (including its grants), independently of dbt.
 
 | Test | Checks |
 |---|---|
@@ -16,7 +16,7 @@ Data tests that run directly against Snowflake. Each `.sql` file selects the row
 | `cdc_commit_latency_within_sla` | p95 Postgres-commit-to-Snowflake latency over the last 15 minutes is under `$sla_seconds` |
 | `cdc_freshness_view_reports_every_table` | `CDC_FRESHNESS` covers both CDC tables, the initial snapshot has landed, and there are no impossible values |
 
-These tests check **structure and lineage** only. Value-level anomalies such as temperature spikes, nulls or duplicate `event_id`s are expected in Bronze and are caught by the Silver-tier tests. The same goes for CDC: repeated changes and deleted rows are part of the log, and Silver resolves them into current state.
+These tests check **structure and lineage** only. Value-level anomalies such as temperature spikes, nulls or duplicate `event_id`s are expected in Bronze and are flagged or removed in Silver, where the dbt tests cover them. The same goes for CDC: repeated changes and deleted rows are part of the log, and Silver resolves them into current state.
 
 ## Run
 

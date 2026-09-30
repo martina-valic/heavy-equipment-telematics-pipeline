@@ -1,0 +1,49 @@
+# Module 4: Bronze -> Silver -> Gold transformations in Snowflake (database TELEMATICS).
+# Run through run_dbt.py locally, or the dbt image (Docker Compose "dbt" service, Kubernetes CronJob).
+name: telematics
+version: "1.0.0"
+profile: telematics
+
+flags:
+  send_anonymous_usage_stats: false
+
+vars:
+  # Incremental models re-read this many minutes before their newest row, so late or re-delivered
+  # Bronze rows are picked up. Merges and delete+insert keep the re-read idempotent.
+  incremental_lookback_minutes: 15
+  # Merges only scan target rows ingested this recently. Redeliveries arrive within seconds.
+  merge_window_days: 1
+  # Simulator cadence: each telemetry event stands for this many seconds of machine time.
+  telemetry_interval_seconds: 5
+  # Equipment health: look-back window, and when a machine counts as offline.
+  health_window_hours: 24
+  offline_after_minutes: 15
+  critical_fault_rate: 0.20
+  service_due_soon_fraction: 0.10
+  # Warn-level data-quality tests fire when a flag's share of rows exceeds this.
+  max_anomaly_rate: 0.05
+
+models:
+  telematics:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +schema: silver
+      +materialized: view
+    silver:
+      +schema: silver
+      +materialized: table
+    gold:
+      +schema: gold
+      +materialized: table
+      # Gold is the interface for reporting (Module 5): column names and types are a contract.
+      +contract:
+        enforced: true
+
+seeds:
+  telematics:
+    +schema: silver
+    +persist_docs:
+      relation: true
+      columns: true

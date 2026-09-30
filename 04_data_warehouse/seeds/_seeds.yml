@@ -1,0 +1,33 @@
+seeds:
+  - name: signal_catalog
+    description: >
+      Every signal each equipment type reports, with its expected range. Generated from the
+      simulator's SIGNAL_REGISTRY by generate_signal_catalog.py; do not edit by hand.
+    config:
+      column_types:
+        type_name: varchar
+        tag: varchar
+        signal_name: varchar
+        unit: varchar
+        unit_description: varchar
+        subsystem: varchar
+        min_expected: float
+        max_expected: float
+        allowed_values: varchar
+        is_cumulative: boolean
+    columns:
+      - name: type_name
+      - name: tag
+        description: OPC UA node identifier, e.g. NS=2;s=Engine_Oil_Temp.
+      - name: min_expected
+        description: Lowest expected value across IDLE, OPERATIONAL and FAULT. Empty for CODE signals.
+      - name: max_expected
+        description: Highest expected value. Empty for CODE signals and cumulative counters.
+      - name: allowed_values
+        description: Valid codes of a CODE signal, separated by "|".
+      - name: is_cumulative
+        description: Counter that only grows (engine hours, uptime), so it has no upper bound.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [type_name, tag]

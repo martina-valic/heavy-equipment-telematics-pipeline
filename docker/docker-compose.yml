@@ -1,6 +1,6 @@
-# Local dev stack for Modules 1-3: single-node KRaft broker, the legacy PostgreSQL database,
-# Kafka Connect with the Snowflake sink and Debezium source, and Kafka UI. The same stack runs on
-# Minikube from kubernetes/.
+# Local dev stack for Modules 1-4: single-node KRaft broker, the legacy PostgreSQL database,
+# Kafka Connect with the Snowflake sink and Debezium source, Kafka UI, and dbt (on demand). The same
+# stack runs on Minikube from kubernetes/.
 # Usage (from repo root): docker compose -f docker/docker-compose.yml up -d --build
 name: telematics
 
@@ -119,6 +119,20 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: telematics-connect
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+
+  # dbt (Module 4): builds Silver and Gold in Snowflake from Bronze. It talks only to Snowflake, and
+  # the "dbt" profile keeps it out of `up`: run it on demand instead.
+  #   docker compose -f docker/docker-compose.yml run --rm --build dbt        # the scheduled build
+  #   docker compose -f docker/docker-compose.yml run --rm dbt test --select silver
+  dbt:
+    build: ../04_data_warehouse
+    image: telematics/dbt:core1.12.5-sf1.12.1
+    container_name: telematics-dbt
+    profiles: ["dbt"]
+    # SNOWFLAKE_ACCOUNT/WAREHOUSE/DATABASE and the DBT_SNOWFLAKE_* settings from the repo-root .env.
+    env_file:
+      - path: ../.env
+        required: false
 
 volumes:
   kafka-data:

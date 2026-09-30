@@ -1,7 +1,7 @@
 #!/bin/bash
 # Deploys Kafka (KRaft), the legacy Postgres database, Kafka Connect with the Snowflake sink and
-# the Debezium source, and Kafka UI to Minikube, then registers the connectors. Idempotent: safe
-# to run any number of times.
+# the Debezium source, Kafka UI, and the dbt CronJob to Minikube, then registers the connectors.
+# Idempotent: safe to run any number of times.
 #
 # Usage (from the repo root, in Git Bash on Windows or any POSIX shell):
 #   minikube start --driver=docker --cpus=4 --memory=6g   # first time only
@@ -11,6 +11,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE=telematics
 CONNECT_IMAGE=telematics/kafka-connect:sf4.2.0-dbz3.7.0
+DBT_IMAGE=telematics/dbt:core1.12.5-sf1.12.1
 ENV_FILE="$REPO_ROOT/.env"
 SECRET_ENV="$REPO_ROOT/secrets/.k8s-secret.env"
 
@@ -38,10 +39,14 @@ grep -q '^SNOWFLAKE_PRIVATE_KEY=.\+' "$ENV_FILE" \
   || { echo "SNOWFLAKE_PRIVATE_KEY is empty. Run: python 02_streaming_ingestion/snowflake/generate_keypair.py"; exit 1; }
 grep -q '^POSTGRES_CDC_PASSWORD=.\+' "$ENV_FILE" \
   || { echo "Postgres passwords are not set. Run: python 03_cdc_migration/postgres/configure_env.py"; exit 1; }
+grep -q '^DBT_SNOWFLAKE_PRIVATE_KEY=.\+' "$ENV_FILE"   || { echo "DBT_SNOWFLAKE_PRIVATE_KEY is empty. Run: python 04_data_warehouse/snowflake/generate_dbt_keypair.py"; exit 1; }
 kubectl config use-context minikube > /dev/null
 
 step "Building $CONNECT_IMAGE inside Minikube (cached after the first build)"
 minikube image build -t "$CONNECT_IMAGE" "$REPO_ROOT/02_streaming_ingestion/connect"
+
+step "Building $DBT_IMAGE inside Minikube"
+minikube image build -t "$DBT_IMAGE" "$REPO_ROOT/04_data_warehouse"
 
 step "Applying namespace, script ConfigMaps and Secrets"
 kubectl apply -f "$REPO_ROOT/kubernetes/namespace.yaml"
@@ -57,6 +62,7 @@ mkdir -p "$REPO_ROOT/secrets"
 secret_from_env snowflake-credentials '^SNOWFLAKE_[A-Z_]+='
 secret_from_env postgres-credentials '^POSTGRES_(DB|USER|PASSWORD|CDC_USER|CDC_PASSWORD|APP_USER|APP_PASSWORD)='
 secret_from_env postgres-cdc-credentials '^POSTGRES_(DB|CDC_USER|CDC_PASSWORD)='
+secret_from_env dbt-snowflake-credentials '^(SNOWFLAKE_(ACCOUNT|WAREHOUSE|DATABASE)|DBT_SNOWFLAKE_[A-Z_]+)='
 
 step "Applying manifests"
 # Jobs are immutable; delete the finished one so the topic script runs again.
@@ -86,4 +92,8 @@ Deployed. To use the cluster from this machine (run each in its own terminal):
   kubectl -n $NAMESPACE port-forward svc/kafka-connect 8083:8083    # Connect REST API
   kubectl -n $NAMESPACE port-forward svc/kafka-ui 8080:8080         # http://localhost:8080
 Stop the Docker Compose stack first; both use ports 9092, 5432, 8083 and 8080.
+
+dbt builds Silver and Gold every 5 minutes (CronJob dbt-build). To run it now and follow the log:
+  kubectl -n $NAMESPACE create job dbt-build-manual-\$(date +%s) --from=cronjob/dbt-build
+  kubectl -n $NAMESPACE logs -f -l app=dbt --tail=-1
 EOF

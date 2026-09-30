@@ -83,7 +83,7 @@ Both tables use the connector's non-schematized layout. Parsing happens in Silve
 | `RECORD_CONTENT` | The Kafka message value, as `VARIANT` |
 | `RECORD_METADATA` | `topic`, `partition`, `offset`, `key` (equipment serial number), `CreateTime` (produce time, epoch ms), `SnowflakeConnectorPushTime` |
 
-Rows are append-only. Delivery is at-least-once from the producer, so `event_id` duplicates are expected here. Silver deduplicates them (see the [data contract](../documentation/data_contracts/equipment_telemetry.md)).
+Rows are append-only. Delivery is at-least-once from the producer, so `event_id` duplicates are expected here. Silver deduplicates them (see the [data contract](../data_contracts/equipment_telemetry.md)).
 
 ## SLA
 

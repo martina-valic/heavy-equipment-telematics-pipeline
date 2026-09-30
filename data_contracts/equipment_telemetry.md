@@ -9,7 +9,7 @@
 | Message key | `equipment_serial_number` (keeps per-machine ordering within a partition) |
 | Cadence | One event per machine every 5 seconds (40 machines, about 8 events/s) |
 | Delivery | At-least-once. Consumers deduplicate on `event_id` |
-| Bronze landing | `TELEMATICS.BRONZE.EQUIPMENT_TELEMETRY_RAW`; DLQ records in `EQUIPMENT_TELEMETRY_DLQ_RAW` ([Module 2](../../02_streaming_ingestion/README.md)) |
+| Bronze landing | `TELEMATICS.BRONZE.EQUIPMENT_TELEMETRY_RAW`; DLQ records in `EQUIPMENT_TELEMETRY_DLQ_RAW` ([Module 2](../02_streaming_ingestion/README.md)) |
 | Ingestion SLA | Queryable in Bronze within 120 seconds of being produced to Kafka. Tracked in `BRONZE.INGESTION_FRESHNESS` |
 
 ## What the contract enforces
@@ -59,14 +59,16 @@ Readings use a long (tag/value) format, so each machine type can report its own 
 
 About 5–10% of events (`ANOMALY_RATE`, default 7.5%) carry one of these defects:
 
-| Anomaly | Passes contract? | Expected catch |
+| Anomaly | Passes contract? | Caught in Silver ([Module 4](../04_data_warehouse/README.md)) |
 |---|---|---|
-| `TEMPERATURE_SPIKE`: a `DEGC` reading jumps to 250–999 | Yes | Silver range test |
-| `PRESSURE_DROP`: a `PSI` reading drops to between -50 and 0 | Yes | Silver range test |
-| `NULL_READINGS`: 1–3 values set to `null` | Yes | Silver `not_null` / completeness test |
-| `MISSING_READINGS`: 2–5 readings dropped | Yes | Silver expected-signal-count test |
-| `DUPLICATE_EVENT`: the previous event is re-sent with the same `event_id` | Yes | Silver `unique` test on `event_id` |
-| `CONTRACT_VIOLATION`: a required field is removed or a numeric value becomes a string | **No** | Sent to the DLQ topic |
+| `TEMPERATURE_SPIKE`: a `DEGC` reading jumps to 250–999 | Yes | `telemetry_readings.is_out_of_range` (range from the signal catalog). On `Exhaust_Gas_Temp`, whose FAULT range reaches 750, only spikes above 750 are caught |
+| `PRESSURE_DROP`: a `PSI` reading drops to between -50 and 0 | Yes | `telemetry_readings.is_out_of_range` |
+| `NULL_READINGS`: 1–3 values set to `null` | Yes | `telemetry_readings.is_missing_value` |
+| `MISSING_READINGS`: 2–5 readings dropped | Yes | `telemetry_events.is_incomplete` (signals expected for the type vs. received) |
+| `DUPLICATE_EVENT`: the previous event is re-sent with the same `event_id` | Yes | Removed by deduplication on `event_id` (first delivery wins). Counted in `GOLD.FCT_TELEMETRY_QUALITY_HOURLY` |
+| `CONTRACT_VIOLATION`: a required field is removed or a numeric value becomes a string | **No** | Sent to the DLQ topic; lands in `SILVER.TELEMETRY_CONTRACT_VIOLATIONS` |
+
+Flagged readings stay in Silver; Gold statistics exclude them. Warn-level dbt tests report when a flag's share over the last 24 hours exceeds `max_anomaly_rate` (5%), well above the injected rate.
 
 ## Versioning
 

@@ -21,10 +21,11 @@ A production-grade, end-to-end data platform designed to ingest, synchronize, an
 * **Bronze Landing**: The Snowflake sink lands the raw Debezium envelopes in Bronze CDC tables within the same 120-second SLA, measured from the Postgres commit. It runs on Docker Compose and Minikube and is exercised end to end in CI.
 
 ## Module 4: Modern Data Warehouse & Medallion Transformation (`04_data_warehouse`)
-* **Bronze Tier**: Landing zone for raw, unparsed JSON payloads originating from both IoT streams and Debezium CDC logs.
-* **Silver Tier**: dbt models parsing, casting, cleaning, and structuring raw payloads into typed relational schemas.
-* **Gold Tier**: Aggregated business logic, operational summaries, and equipment health metrics modeled using Kimball Methodologies and Star Schema design optimized for reporting.
-* **Testing & Quality Assurance**: Comprehensive dbt test suites validating schema integrity, uniqueness, and relational constraints.
+* **Bronze Tier**: Landing zone for raw, unparsed JSON payloads originating from both IoT streams and Debezium CDC logs, declared as dbt sources with freshness checks.
+* **Silver Tier**: dbt models that parse, type and deduplicate the raw payloads into relational tables. Incremental merges run on the Bronze load time. Every telemetry reading is checked against a signal catalog generated from the simulator config, and anomalies are flagged rather than dropped. SCD Type 2 equipment history and current-state hour-meter logs are rebuilt from the Debezium change log.
+* **Gold Tier**: Kimball star schema with an SCD2 equipment dimension joined as of each event's time, signal and date dimensions, hourly equipment, sensor and data-quality facts, and an equipment health mart. Every Gold model has an enforced dbt contract.
+* **Testing & Quality Assurance**: dbt tests for keys, relationships and SCD2 integrity, warn-level anomaly-rate thresholds, dbt unit tests, and a Gold-to-Silver reconciliation check.
+* **Orchestration**: dbt Core runs every 5 minutes as a Kubernetes CronJob (Minikube), on demand through Docker Compose, with its own least-privilege Snowflake role and key-pair service user.
 
 ## Module 5: Dashboard Analytics & Monitoring (`05_dashboard_analytics`)
 * **Grafana Integration**: Connected Grafana visualization dashboards directly to Snowflake data warehouse models (Silver/Gold layers).

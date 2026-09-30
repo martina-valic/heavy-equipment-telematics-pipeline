@@ -12,7 +12,7 @@ fleet.hour_meter_logs  ─┘   -legacy-fleet    └─► telematics.legacy.hou
 legacy_activity.py (simulated legacy app)
 ```
 
-Events keep the full Debezium envelope (`before`, `after`, `op`, `source`). The event format, type mapping and guarantees are in the [data contract](../documentation/data_contracts/legacy_fleet_cdc.md).
+Events keep the full Debezium envelope (`before`, `after`, `op`, `source`). The event format, type mapping and guarantees are in the [data contract](../data_contracts/legacy_fleet_cdc.md).
 
 ## Files
 

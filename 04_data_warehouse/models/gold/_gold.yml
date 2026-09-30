@@ -1,0 +1,283 @@
+# Gold: Kimball star schema for reporting (Module 5). Every model has an enforced contract: dbt
+# refuses to build it if a column's name or type drifts from what is declared here.
+models:
+  # ---------------------------------------------------------------------------
+  # Dimensions
+  # ---------------------------------------------------------------------------
+  - name: dim_date
+    description: Calendar dimension, one row per day from 2015 to 2030.
+    columns:
+      - name: date_key
+        data_type: "number(38, 0)"
+        description: YYYYMMDD.
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - {name: date_day, data_type: date, constraints: [{type: not_null}], data_tests: [unique]}
+      - {name: year_number, data_type: "number(38, 0)"}
+      - {name: quarter_number, data_type: "number(38, 0)"}
+      - {name: month_number, data_type: "number(38, 0)"}
+      - {name: month_name, data_type: varchar}
+      - {name: iso_week_number, data_type: "number(38, 0)"}
+      - {name: iso_day_of_week, data_type: "number(38, 0)", description: 1 = Monday ... 7 = Sunday.}
+      - {name: day_name, data_type: varchar}
+      - {name: is_weekend, data_type: boolean}
+      - {name: week_start_date, data_type: date}
+      - {name: month_start_date, data_type: date}
+
+  - name: dim_equipment
+    description: >
+      Equipment master data from the legacy system, SCD Type 2: one row per version. Join facts to
+      the version valid at the event time (effective_from <= t < effective_to). equipment_key '-1'
+      is the unknown member.
+    columns:
+      - name: equipment_key
+        data_type: varchar
+        description: Surrogate key of the version.
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - {name: equipment_id, data_type: "number(38, 0)", description: Natural key (legacy fleet.equipment.equipment_id)., constraints: [{type: not_null}]}
+      - {name: equipment_serial_number, data_type: varchar}
+      - {name: type_name, data_type: varchar}
+      - {name: category, data_type: varchar, description: BEV or Diesel.}
+      - {name: manufacturer, data_type: varchar}
+      - {name: model, data_type: varchar}
+      - {name: commissioned_on, data_type: date}
+      - {name: assigned_site, data_type: varchar}
+      - name: status
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ACTIVE, STANDBY, MAINTENANCE, DECOMMISSIONED, UNKNOWN]
+      - {name: service_interval_hours, data_type: "number(38, 0)"}
+      - {name: effective_from, data_type: timestamp_tz, description: Start of the version. 1900-01-01 for a machine's first version., constraints: [{type: not_null}]}
+      - {name: effective_to, data_type: timestamp_tz, description: End of the version (exclusive). 9999-12-31 while current., constraints: [{type: not_null}]}
+      - {name: is_current, data_type: boolean}
+
+  - name: dim_signal
+    description: >
+      Signals per equipment type, from the signal catalog. signal_key '-1' is the unknown member.
+    columns:
+      - name: signal_key
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - {name: type_name, data_type: varchar}
+      - {name: tag, data_type: varchar, description: OPC UA node identifier.}
+      - {name: signal_name, data_type: varchar}
+      - {name: unit, data_type: varchar}
+      - {name: unit_description, data_type: varchar}
+      - {name: subsystem, data_type: varchar}
+      - {name: min_expected, data_type: float}
+      - {name: max_expected, data_type: float}
+      - {name: allowed_values, data_type: varchar}
+      - {name: is_cumulative, data_type: boolean}
+
+  # ---------------------------------------------------------------------------
+  # Facts
+  # ---------------------------------------------------------------------------
+  - name: fct_equipment_signal_hourly
+    description: >
+      Sensor statistics per hour, machine version and signal. min/max/avg/sum cover valid values
+      only (missing and out-of-range readings are counted, not averaged).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hour_start, equipment_key, signal_key]
+          config: &last_week
+            where: "hour_start >= dateadd('day', -7, current_timestamp())"
+    columns:
+      - name: equipment_signal_hour_key
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - {name: hour_start, data_type: timestamp_tz, constraints: [{type: not_null}]}
+      - name: date_key
+        data_type: "number(38, 0)"
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+              config: *last_week
+      - name: equipment_key
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_equipment'), field: equipment_key}
+              config: *last_week
+      - name: signal_key
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_signal'), field: signal_key}
+              config: *last_week
+      - {name: sample_count, data_type: "number(38, 0)"}
+      - {name: valid_sample_count, data_type: "number(38, 0)"}
+      - {name: missing_value_count, data_type: "number(38, 0)"}
+      - {name: out_of_range_count, data_type: "number(38, 0)"}
+      - {name: min_value, data_type: float}
+      - {name: max_value, data_type: float}
+      - {name: avg_value, data_type: float}
+      - {name: sum_value, data_type: float}
+      - {name: last_ingested_at, data_type: timestamp_tz, description: Newest Bronze load time in the hour; the incremental watermark.}
+
+  - name: fct_equipment_hourly
+    description: Operating time, utilization and availability per hour and machine version.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hour_start, equipment_key]
+          config: *last_week
+    columns:
+      - name: equipment_hour_key
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - {name: hour_start, data_type: timestamp_tz, constraints: [{type: not_null}]}
+      - name: date_key
+        data_type: "number(38, 0)"
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+              config: *last_week
+      - name: equipment_key
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_equipment'), field: equipment_key}
+              config: *last_week
+      - {name: event_count, data_type: "number(38, 0)"}
+      - {name: idle_event_count, data_type: "number(38, 0)"}
+      - {name: operational_event_count, data_type: "number(38, 0)"}
+      - {name: fault_event_count, data_type: "number(38, 0)"}
+      - {name: quality_issue_event_count, data_type: "number(38, 0)"}
+      - {name: idle_hours, data_type: float}
+      - {name: operating_hours, data_type: float}
+      - {name: fault_hours, data_type: float}
+      - name: utilization_rate
+        data_type: float
+        description: Share of the hour's events in OPERATIONAL.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+              config: *last_week
+      - name: availability_rate
+        data_type: float
+        description: Share of the hour's events not in FAULT.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+              config: *last_week
+      - {name: first_event_at, data_type: timestamp_tz}
+      - {name: last_event_at, data_type: timestamp_tz}
+      - {name: last_ingested_at, data_type: timestamp_tz}
+
+  - name: fct_hour_meter_readings
+    description: Hour-meter readings from the legacy system as they stand now (corrected, voided ones removed).
+    columns:
+      - name: hour_meter_reading_key
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - {name: log_id, data_type: "number(38, 0)", description: Degenerate dimension (legacy fleet.hour_meter_logs.log_id).}
+      - name: equipment_key
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_equipment'), field: equipment_key}
+      - name: date_key
+        data_type: "number(38, 0)"
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+      - {name: reading_at, data_type: timestamp_tz}
+      - {name: hour_meter, data_type: "number(9, 1)"}
+      - {name: hours_since_previous_reading, data_type: "number(10, 1)", description: Hours logged since the machine's previous reading.}
+      - {name: reading_source, data_type: varchar}
+      - {name: is_service_visit, data_type: boolean}
+      - {name: recorded_by, data_type: varchar}
+      - {name: correction_count, data_type: "number(38, 0)"}
+
+  - name: fct_telemetry_quality_hourly
+    description: Fleet-wide telemetry data quality per hour of event time.
+    columns:
+      - name: hour_start
+        data_type: timestamp_tz
+        constraints: [{type: not_null}]
+        data_tests:
+          - unique:
+              config: *last_week
+      - name: date_key
+        data_type: "number(38, 0)"
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+              config: *last_week
+      - {name: delivered_event_count, data_type: "number(38, 0)", description: Rows in Bronze (every Kafka delivery).}
+      - {name: unique_event_count, data_type: "number(38, 0)", description: Events in Silver after deduplication.}
+      - name: duplicate_delivery_count
+        data_type: "number(38, 0)"
+        description: Deliveries that did not add a new event.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+              config: *last_week
+      - {name: contract_violation_count, data_type: "number(38, 0)", description: Events rejected to the DLQ in this hour.}
+      - {name: incomplete_event_count, data_type: "number(38, 0)"}
+      - {name: missing_value_event_count, data_type: "number(38, 0)"}
+      - {name: out_of_range_event_count, data_type: "number(38, 0)"}
+      - {name: clean_event_count, data_type: "number(38, 0)"}
+      - {name: clean_event_rate, data_type: float, description: Clean events / (unique events + contract violations).}
+      - {name: last_ingested_at, data_type: timestamp_tz}
+
+  # ---------------------------------------------------------------------------
+  # Marts
+  # ---------------------------------------------------------------------------
+  - name: equipment_health
+    description: >
+      Current health of every machine, as of the last dbt run: status, recent telemetry, fault and
+      anomaly rates over the health window, and service due from the legacy hour meters.
+    columns:
+      - name: equipment_key
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests:
+          - unique
+          - relationships:
+              arguments: {to: ref('dim_equipment'), field: equipment_key}
+      - {name: equipment_id, data_type: "number(38, 0)", data_tests: [unique]}
+      - {name: equipment_serial_number, data_type: varchar}
+      - {name: type_name, data_type: varchar}
+      - {name: category, data_type: varchar}
+      - {name: manufacturer, data_type: varchar}
+      - {name: model, data_type: varchar}
+      - {name: assigned_site, data_type: varchar}
+      - {name: status, data_type: varchar, description: Status in the legacy system.}
+      - name: health_status
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [HEALTHY, WARNING, OFFLINE, CRITICAL, DECOMMISSIONED]
+      - {name: health_reasons, data_type: varchar, description: "Every condition that applies, comma-separated."}
+      - {name: last_telemetry_at, data_type: timestamp_tz}
+      - {name: last_operating_state, data_type: varchar}
+      - {name: minutes_since_last_telemetry, data_type: "number(38, 0)"}
+      - {name: is_offline, data_type: boolean}
+      - {name: window_event_count, data_type: "number(38, 0)", description: Telemetry events in the health window (health_window_hours).}
+      - {name: window_fault_event_count, data_type: "number(38, 0)"}
+      - {name: window_fault_rate, data_type: float}
+      - {name: window_utilization_rate, data_type: float}
+      - {name: window_out_of_range_event_rate, data_type: float}
+      - {name: window_quality_issue_event_count, data_type: "number(38, 0)"}
+      - {name: latest_hour_meter, data_type: "number(9, 1)"}
+      - {name: latest_hour_meter_at, data_type: timestamp_tz}
+      - {name: hour_meter_at_last_service, data_type: "number(9, 1)"}
+      - {name: last_service_at, data_type: timestamp_tz}
+      - {name: service_interval_hours, data_type: "number(38, 0)"}
+      - {name: hours_until_service_due, data_type: "number(10, 1)", description: Negative when overdue.}
+      - name: service_status
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [OK, DUE_SOON, OVERDUE, UNKNOWN]
+      - {name: as_of, data_type: timestamp_tz, description: When the row was computed.}

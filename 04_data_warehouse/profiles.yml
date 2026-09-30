@@ -1,0 +1,19 @@
+# Connection profile. Every value comes from the environment (the repo-root .env locally, a
+# Kubernetes Secret on Minikube), so this file holds no secrets and is safe to commit.
+telematics:
+  target: prod
+  outputs:
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('DBT_SNOWFLAKE_USER', 'TELEMATICS_DBT') }}"
+      role: "{{ env_var('DBT_SNOWFLAKE_ROLE', 'TELEMATICS_TRANSFORM_ROLE') }}"
+      # Key-pair auth: base64 body of secrets/snowflake_dbt_rsa_key.p8 (generate_dbt_keypair.py).
+      private_key: "{{ env_var('DBT_SNOWFLAKE_PRIVATE_KEY') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TELEMATICS_WH') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'TELEMATICS') }}"
+      schema: silver
+      threads: 4
+      query_tag: telematics_dbt
+      connect_retries: 3
+      connect_timeout: 30

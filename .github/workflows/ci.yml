@@ -39,7 +39,7 @@ jobs:
           python - <<'EOF'
           import json, pathlib
           from jsonschema import Draft202012Validator
-          for path in sorted(pathlib.Path("documentation/data_contracts").glob("*.schema.json")):
+          for path in sorted(pathlib.Path("data_contracts").glob("*.schema.json")):
               Draft202012Validator.check_schema(json.loads(path.read_text(encoding="utf-8")))
               print(f"valid: {path}")
           EOF
@@ -59,6 +59,40 @@ jobs:
         run: |
           kubectl kustomize kubernetes > "$RUNNER_TEMP/manifests.yaml"
           docker run --rm -v "$RUNNER_TEMP:/work:ro" ghcr.io/yannh/kubeconform:v0.8.0             -strict -summary /work/manifests.yaml
+
+  dbt-validate:
+    name: dbt project validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # CI has no Snowflake credentials, so dbt parses the project (YAML, Jinja, refs, tests, contracts
+    # declared) without connecting. The profile only needs placeholder values to render.
+    env:
+      SNOWFLAKE_ACCOUNT: ci-parse-only
+      DBT_SNOWFLAKE_PRIVATE_KEY: ci-parse-only
+      DBT_PROFILES_DIR: ${{ github.workspace }}/04_data_warehouse
+    defaults:
+      run:
+        working-directory: 04_data_warehouse
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: 04_data_warehouse/requirements.txt
+
+      - name: Install dbt
+        run: pip install -r requirements.txt
+
+      - name: Install dbt packages (pinned by package-lock.yml)
+        run: dbt deps
+
+      - name: Parse the project, failing on any warning or deprecation
+        run: dbt parse --warn-error --no-partial-parse
+
+      - name: Build the dbt image
+        run: docker build -t telematics/dbt:ci .
 
   kafka-integration:
     name: Kafka integration tests

@@ -21,7 +21,7 @@ ROLES_SH = (INIT_DIR / "02_roles.sh").read_text(encoding="utf-8")
 CREATE_TOPICS = (REPO_ROOT / "kafka" / "create_topics.sh").read_text(encoding="utf-8")
 ENV_EXAMPLE = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
 CONTRACT = json.loads(
-    (REPO_ROOT / "documentation" / "data_contracts" / "legacy_fleet_cdc.v1.schema.json").read_text(encoding="utf-8")
+    (REPO_ROOT / "data_contracts" / "legacy_fleet_cdc.v1.schema.json").read_text(encoding="utf-8")
 )
 CONNECTORS = {spec["name"]: spec["config"] for spec in load_connectors()}
 SOURCE = CONNECTORS["debezium-source-legacy-fleet"]

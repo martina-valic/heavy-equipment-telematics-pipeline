@@ -31,7 +31,7 @@ LOGS_TOPIC = "telematics.legacy.hour_meter_logs.cdc.v1"
 # Debezium streams within a second or two; this only bounds a hung test.
 CDC_TIMEOUT_SECONDS = 60
 CONTRACT = json.loads(
-    (REPO_ROOT / "documentation" / "data_contracts" / "legacy_fleet_cdc.v1.schema.json").read_text(encoding="utf-8")
+    (REPO_ROOT / "data_contracts" / "legacy_fleet_cdc.v1.schema.json").read_text(encoding="utf-8")
 )
 
 

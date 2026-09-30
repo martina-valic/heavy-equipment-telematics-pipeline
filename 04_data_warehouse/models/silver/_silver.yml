@@ -1,0 +1,263 @@
+# Silver: typed, deduplicated and quality-flagged. Structural tests (keys, types, history integrity)
+# are errors. Anomaly tests are warnings: the rows stay in Silver with flags, and the tests report
+# when a flag becomes more frequent than max_anomaly_rate over the last 24 hours.
+models:
+  - name: telemetry_readings
+    description: >
+      One row per reading of a unique telemetry event, typed and checked against the signal catalog.
+      Readings are flagged (missing value, out of range, unexpected signal), never dropped.
+    columns:
+      - name: reading_id
+        description: Hash of (event_id, tag).
+        # The table grows by about 24 million rows a day while the simulator runs, and dbt build runs
+        # every 5 minutes, so the key tests check the last day of loads.
+        data_tests:
+          - unique:
+              config: &last_day
+                where: "ingested_at >= dateadd('day', -1, current_timestamp())"
+          - not_null:
+              config: *last_day
+      - name: event_id
+        data_tests:
+          - not_null:
+              config: *last_day
+          - relationships:
+              arguments:
+                to: ref('telemetry_events')
+                field: event_id
+              config: *last_day
+      - name: event_at
+        data_tests: [not_null]
+      - name: tag
+        description: OPC UA node identifier, e.g. NS=2;s=Engine_Oil_Temp.
+        data_tests: [not_null]
+      - name: signal_name
+        description: Tag without the NS=2;s= prefix.
+      - name: numeric_value
+        description: Value of a numeric signal. NULL for CODE signals and missing values.
+      - name: code_value
+        description: Value of a CODE signal (e.g. a location zone).
+      - name: is_missing_value
+        description: The sensor did not report (JSON null). Catches NULL_READINGS anomalies.
+        data_tests:
+          - anomaly_rate_at_most:
+              config:
+                severity: warn
+                where: "event_at >= dateadd('hour', -24, current_timestamp())"
+      - name: is_out_of_range
+        description: >
+          Outside the signal's expected range (min/max across all operating states), or a code not
+          in its allowed list. Catches TEMPERATURE_SPIKE and PRESSURE_DROP anomalies.
+        data_tests:
+          - anomaly_rate_at_most:
+              config:
+                severity: warn
+                where: "event_at >= dateadd('hour', -24, current_timestamp())"
+      - name: is_expected_signal
+        description: >
+          The tag is in the signal catalog for this equipment type. False means the simulator emits
+          a signal the catalog does not know: re-run generate_signal_catalog.py.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [true]
+      - name: ingested_at
+        description: Bronze load time of the event's first delivery.
+
+  - name: telemetry_events
+    description: >
+      One row per unique telemetry event (first delivery wins on event_id), with a data-quality
+      summary rolled up from its readings.
+    columns:
+      - name: event_id
+        data_tests:
+          - unique:
+              config: *last_day
+          - not_null:
+              config: *last_day
+      - name: event_at
+        data_tests: [not_null]
+      - name: equipment_id
+        data_tests:
+          - not_null
+          # Every telemetry machine should exist in the legacy master data.
+          - relationships:
+              arguments:
+                to: ref('equipment_history')
+                field: equipment_id
+              config:
+                severity: warn
+      - name: operating_state
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [IDLE, OPERATIONAL, FAULT]
+      - name: reading_count
+        description: Readings the event carried.
+      - name: expected_reading_count
+        description: Signals the signal catalog lists for this equipment type.
+      - name: missing_signal_count
+        description: Catalog signals the event did not report at all.
+      - name: missing_value_count
+        description: Readings with a null value.
+      - name: out_of_range_count
+        description: Readings outside their expected range.
+      - name: unexpected_signal_count
+        description: Readings of tags not in the catalog for this type.
+      - name: is_incomplete
+        description: At least one expected signal is missing. Catches MISSING_READINGS anomalies.
+        data_tests:
+          - anomaly_rate_at_most:
+              config:
+                severity: warn
+                where: "event_at >= dateadd('hour', -24, current_timestamp())"
+      - name: has_missing_values
+      - name: has_out_of_range_values
+      - name: has_quality_issue
+        description: Any of the flags above. Gold statistics exclude the affected readings.
+
+  - name: telemetry_contract_violations
+    description: Events rejected against the telemetry contract (CONTRACT_VIOLATION), one row per DLQ record.
+    columns:
+      - name: violation_id
+        data_tests: [unique, not_null]
+      - name: failed_at
+        data_tests: [not_null]
+
+  - name: legacy_equipment_changes
+    description: The fleet.equipment CDC log, deduplicated on change_id.
+    columns:
+      - name: change_id
+        data_tests: [unique, not_null]
+      - name: equipment_id
+        data_tests: [not_null]
+
+  - name: legacy_hour_meter_log_changes
+    description: The fleet.hour_meter_logs CDC log, deduplicated on change_id.
+    columns:
+      - name: change_id
+        data_tests: [unique, not_null]
+      - name: log_id
+        data_tests: [not_null]
+
+  - name: equipment_history
+    description: >
+      SCD Type 2 history of fleet.equipment built from the CDC log. One row per version; a delete
+      is a version with is_deleted = true that closes the version before it.
+    columns:
+      - name: equipment_version_id
+        description: Hash of (equipment_id, lsn) of the change that started the version.
+        data_tests: [unique, not_null]
+      - name: equipment_id
+        data_tests: [not_null]
+      - name: valid_from
+        description: When the version started (the row's updated_at, or the commit time of a delete).
+        data_tests: [not_null]
+      - name: valid_to
+        description: When the next version started. NULL for the latest version.
+      - name: is_current
+        description: Latest version of a machine that has not been deleted.
+      - name: is_deleted
+        description: The row was deleted in the legacy system at valid_from.
+
+  - name: hour_meter_logs
+    description: >
+      Current state of fleet.hour_meter_logs: the latest change per log_id, without voided
+      (deleted) readings.
+    columns:
+      - name: log_id
+        data_tests: [unique, not_null]
+      - name: equipment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('equipment_history')
+                field: equipment_id
+      - name: correction_count
+        description: How many times the reading was corrected (UPDATE) after it was logged.
+
+unit_tests:
+  - name: equipment_history_versions_only_real_changes
+    description: >
+      A snapshot row, a status change, an update that only bumps updated_at, then a delete give
+      three versions: the no-op update extends the current one, and the delete closes it.
+    model: equipment_history
+    given:
+      - input: ref('legacy_equipment_changes')
+        rows:
+          - {equipment_id: 7, lsn: 100, kafka_offset: 0, change_type: SNAPSHOT, is_delete: false, status: ACTIVE,
+             assigned_site: LEVEL_2400, updated_at: "2026-09-01 00:00:00 +00:00", committed_at: "2026-09-02 00:00:00 +00:00"}
+          - {equipment_id: 7, lsn: 200, kafka_offset: 1, change_type: UPDATE, is_delete: false, status: MAINTENANCE,
+             assigned_site: LEVEL_2400, updated_at: "2026-09-03 00:00:00 +00:00", committed_at: "2026-09-03 00:00:00 +00:00"}
+          - {equipment_id: 7, lsn: 300, kafka_offset: 2, change_type: UPDATE, is_delete: false, status: MAINTENANCE,
+             assigned_site: LEVEL_2400, updated_at: "2026-09-04 00:00:00 +00:00", committed_at: "2026-09-04 00:00:00 +00:00"}
+          - {equipment_id: 7, lsn: 400, kafka_offset: 3, change_type: DELETE, is_delete: true, status: MAINTENANCE,
+             assigned_site: LEVEL_2400, updated_at: "2026-09-04 00:00:00 +00:00", committed_at: "2026-09-05 00:00:00 +00:00"}
+    expect:
+      rows:
+        - {lsn: 100, status: ACTIVE, version_number: 1, valid_from: "2026-09-01 00:00:00 +00:00",
+           valid_to: "2026-09-03 00:00:00 +00:00", is_current: false, is_deleted: false}
+        - {lsn: 200, status: MAINTENANCE, version_number: 2, valid_from: "2026-09-03 00:00:00 +00:00",
+           valid_to: "2026-09-05 00:00:00 +00:00", is_current: false, is_deleted: false}
+        - {lsn: 400, status: MAINTENANCE, version_number: 3, valid_from: "2026-09-05 00:00:00 +00:00",
+           valid_to: null, is_current: false, is_deleted: true}
+
+  - name: hour_meter_logs_applies_corrections_and_voids
+    description: A corrected reading keeps its latest value; a voided (deleted) reading disappears.
+    model: hour_meter_logs
+    given:
+      - input: ref('legacy_hour_meter_log_changes')
+        rows:
+          - {log_id: 1, equipment_id: 3, lsn: 10, kafka_offset: 0, change_type: INSERT, is_delete: false, hour_meter: 100.5}
+          - {log_id: 1, equipment_id: 3, lsn: 20, kafka_offset: 1, change_type: UPDATE, is_delete: false, hour_meter: 105.5}
+          - {log_id: 2, equipment_id: 3, lsn: 30, kafka_offset: 2, change_type: INSERT, is_delete: false, hour_meter: 105.5}
+          - {log_id: 2, equipment_id: 3, lsn: 40, kafka_offset: 3, change_type: DELETE, is_delete: true, hour_meter: 105.5}
+    expect:
+      rows:
+        - {log_id: 1, hour_meter: 105.5, correction_count: 1, last_lsn: 20}
+
+  - name: telemetry_readings_flags_anomalies
+    description: >
+      Flags a temperature spike, a negative pressure, a null value, an unknown location code and
+      a signal missing from the catalog, and leaves an in-range reading unflagged.
+    model: telemetry_readings
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_telemetry__events')
+        format: sql
+        rows: |
+          select
+              'e1'                                   as event_id,
+              1                                      as equipment_id,
+              'Scaler'                               as type_name,
+              '2026-09-29 12:00:00 +00:00'::timestamp_tz as event_at,
+              'FAULT'                                as operating_state,
+              parse_json('[
+                  {"tag": "NS=2;s=Engine_Oil_Temp", "value": 120.5, "unit": "DEGC", "subsystem": "Powertrain"},
+                  {"tag": "NS=2;s=Transmission_Oil_Temp", "value": 850.0, "unit": "DEGC", "subsystem": "Powertrain"},
+                  {"tag": "NS=2;s=Engine_Oil_Pressure", "value": -12.5, "unit": "PSI", "subsystem": "Powertrain"},
+                  {"tag": "NS=2;s=Vehicle_Speed", "value": null, "unit": "KMH", "subsystem": "Mobility"},
+                  {"tag": "NS=2;s=Location_Handshake_Zone", "value": "NOWHERE", "unit": "CODE", "subsystem": "Location"},
+                  {"tag": "NS=2;s=Mystery_Signal", "value": 1, "unit": "COUNT", "subsystem": "Diagnostics"}
+              ]')                                    as readings,
+              0                                      as kafka_partition,
+              0                                      as kafka_offset,
+              '2026-09-29 12:00:01 +00:00'::timestamp_tz as ingested_at
+      - input: ref('signal_catalog')
+        rows:
+          - {type_name: Scaler, tag: "NS=2;s=Engine_Oil_Temp", unit: DEGC, min_expected: 50, max_expected: 135}
+          - {type_name: Scaler, tag: "NS=2;s=Transmission_Oil_Temp", unit: DEGC, min_expected: 40, max_expected: 125}
+          - {type_name: Scaler, tag: "NS=2;s=Engine_Oil_Pressure", unit: PSI, min_expected: 10, max_expected: 75}
+          - {type_name: Scaler, tag: "NS=2;s=Vehicle_Speed", unit: KMH, min_expected: 0, max_expected: 25}
+          - {type_name: Scaler, tag: "NS=2;s=Location_Handshake_Zone", unit: CODE, allowed_values: "RAMP_PORTAL|REFUGE_STATION_B"}
+    expect:
+      rows:
+        - {signal_name: Engine_Oil_Temp, numeric_value: 120.5, is_missing_value: false, is_out_of_range: false, is_expected_signal: true}
+        - {signal_name: Transmission_Oil_Temp, numeric_value: 850.0, is_missing_value: false, is_out_of_range: true, is_expected_signal: true}
+        - {signal_name: Engine_Oil_Pressure, numeric_value: -12.5, is_missing_value: false, is_out_of_range: true, is_expected_signal: true}
+        - {signal_name: Vehicle_Speed, numeric_value: null, is_missing_value: true, is_out_of_range: false, is_expected_signal: true}
+        - {signal_name: Location_Handshake_Zone, numeric_value: null, is_missing_value: false, is_out_of_range: true, is_expected_signal: true}
+        - {signal_name: Mystery_Signal, numeric_value: 1.0, is_missing_value: false, is_out_of_range: false, is_expected_signal: false}

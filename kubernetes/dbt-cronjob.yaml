@@ -1,0 +1,45 @@
+# dbt build every 5 minutes: Bronze -> Silver -> Gold in Snowflake (Module 4). The image is built from
+# 04_data_warehouse by deploy.sh with `minikube image build`. Snowflake settings and dbt's private key
+# come from the dbt-snowflake-credentials Secret, which deploy.sh creates from .env and which holds
+# only dbt's keys (not the Kafka connector's).
+#
+# Each run takes about a minute. Forbid skips a run while the previous one is still going, so two
+# builds never merge into the same tables at once. To stop the runs (and the warehouse credits):
+#   kubectl -n telematics patch cronjob dbt-build -p '{"spec":{"suspend":true}}'
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dbt-build
+  labels: {app: dbt}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # A failed build is retried by the next scheduled run, not in a tight loop.
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels: {app: dbt}
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+          containers:
+            - name: dbt
+              image: telematics/dbt:core1.12.5-sf1.12.1
+              imagePullPolicy: Never
+              args: ["build", "--exclude-resource-type", "unit_test"]
+              envFrom:
+                - secretRef:
+                    name: dbt-snowflake-credentials
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 1Gi}

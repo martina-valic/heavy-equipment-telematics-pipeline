@@ -2,3 +2,4 @@
 -r ../../02_streaming_ingestion/requirements.txt
 -r ../../03_cdc_migration/requirements.txt
 pytest>=8,<10
+pyyaml>=6,<7

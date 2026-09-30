@@ -12,6 +12,8 @@ sys.path.insert(0, str(REPO_ROOT / "01_telemetry_simulator"))
 sys.path.insert(0, str(REPO_ROOT / "02_streaming_ingestion"))
 sys.path.insert(0, str(REPO_ROOT / "03_cdc_migration"))
 sys.path.insert(0, str(REPO_ROOT / "03_cdc_migration" / "postgres"))
+sys.path.insert(0, str(REPO_ROOT / "04_data_warehouse"))
+sys.path.insert(0, str(REPO_ROOT / "04_data_warehouse" / "snowflake"))
 
 from contract import load_validator  # noqa: E402
 from simulator import FleetSimulator  # noqa: E402

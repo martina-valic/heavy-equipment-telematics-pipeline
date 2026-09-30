@@ -1,0 +1,29 @@
+sources:
+  - name: bronze
+    description: >
+      Raw landing tables written by the Kafka Connect Snowflake sink (Modules 2 and 3). Each row is
+      one Kafka record: the payload in RECORD_CONTENT and topic, partition, offset, key and
+      timestamps in RECORD_METADATA. Rows are append-only and never updated.
+    database: "{{ target.database }}"
+    schema: bronze
+    config:
+      loaded_at_field: "to_timestamp_tz(record_metadata:SnowflakeConnectorPushTime::number, 3)"
+    tables:
+      - name: equipment_telemetry_raw
+        description: Telemetry events (data contract equipment_telemetry.v1), topic telematics.equipment.telemetry.v1.
+        config:
+          # The simulator emits every 5 seconds. Stale data means the simulator or the sink stopped.
+          freshness:
+            warn_after: {count: 5, period: minute}
+            error_after: {count: 30, period: minute}
+      - name: equipment_telemetry_dlq_raw
+        description: Events that failed the telemetry contract, wrapped in a DLQ envelope.
+      - name: legacy_equipment_cdc_raw
+        description: Debezium change events for fleet.equipment (data contract legacy_fleet_cdc.v1).
+      - name: legacy_hour_meter_logs_cdc_raw
+        description: Debezium change events for fleet.hour_meter_logs (data contract legacy_fleet_cdc.v1).
+        config:
+          # legacy_activity.py writes a transaction every 10 seconds while it runs.
+          freshness:
+            warn_after: {count: 15, period: minute}
+            error_after: {count: 2, period: hour}

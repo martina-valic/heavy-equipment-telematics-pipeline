@@ -8,12 +8,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 CONTRACT_NAME = "equipment_telemetry.v1"
 SCHEMA_VERSION = "1.0.0"
-CONTRACT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "documentation"
-    / "data_contracts"
-    / f"{CONTRACT_NAME}.schema.json"
-)
+CONTRACT_PATH = Path(__file__).resolve().parents[1] / "data_contracts" / f"{CONTRACT_NAME}.schema.json"
 
 
 def load_validator(path: Path = CONTRACT_PATH) -> Draft202012Validator:
